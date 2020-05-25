@@ -24,6 +24,7 @@ class ColeGame():
         self.winner = None
         self.turn = 'X'
         self.player_turn = self.player1
+        self.last_move = None
         self.savefile.write('\n----------------------------\n\n')
 
     def play_game(self):
@@ -50,11 +51,11 @@ class ColeGame():
     def play_move(self):
 
         if self.turn == 'X':
-            new_state = self.player1.make_move(self.state)
+            new_state, self.last_move = self.player1.make_move(self.state, self.last_move)
             self.turn = 'O'
             self.player_turn = self.player2
         else:
-            new_state = self.player2.make_move(self.state)
+            new_state, self.last_move = self.player2.make_move(self.state, self.last_move)
             #print(self.show_board(new_state))
             self.turn = 'X'
             self.player_turn = self.player1
@@ -137,7 +138,7 @@ class Player():
         moves = []
         for i in range(self.n):
             for j in range(self.n):
-                for dr in range(4):
+                for dr in [0,2]:
                     if self.valid_move(state, i, j, dr, tag):
                         moves.append((i, j, dr))
         return moves
@@ -197,7 +198,7 @@ class Human(Player):
         super().__init__(tot, tag, tp, opp)
         self.type = tp
 
-    def make_move(self, state):
+    def make_move(self, state, last_move):
         lt, i, dr = input('Choose move number: ').split(' ')
         i = int(i)
         j = ord(lt[0]) - ord('a')
@@ -209,7 +210,7 @@ class Human(Player):
             s = self.apply_move(state, i, j, dr, self.num)
         else:
             s = self.apply_angle_move(state, i, j, dr, self.num)
-        return s
+        return s, (i, j, dr)
 
 class Agent(Player):
 
@@ -278,11 +279,11 @@ class Agent(Player):
         return win/self.tot
 
 
-    def make_move(self, state):
+    def make_move(self, state, last_move):
 
         moves = self.get(state, self.tag)
         if not moves:
-            return state
+            return state, None
         best = 0
         #print(self.show_board(state))
         for i, j, dr in moves:
@@ -300,7 +301,203 @@ class Agent(Player):
         else:
             print(str(chr(ord('a')+best_move[1])) + ' ' + str(best_move[0]) + ' ' + dirs_angle[best_move[2]])
         #print(self.show_board(state))
-        return self.apply(state, best_move[0], best_move[1], best_move[2], self.num)
+        return self.apply(state, best_move[0], best_move[1], best_move[2], self.num), best_move
+
+
+
+class Node():
+    def __init__(self, par):
+        self.w = 0
+        self.tot = 0
+        self.par = par
+        self.dct = {}
+        self.unexplored_moves = []
+
+class AgentMC(Player):
+    def __init__(self, tot, tag, tp, opp):
+        super().__init__(tot, tag, tp, opp)
+        self.get = self.get_moves if self.type == 'line' else self.get_angle_moves
+        self.opp_get = self.get_moves if self.opp == 'line' else self.get_angle_moves
+        self.allowed = self.valid_move if self.type == 'line' else self.valid_angle_move
+        self.opp_allowed = self.valid_move if self.opp == 'line' else self.valid_angle_move
+        self.apply_in_place = self.apply_move_in_place if self.type == 'line' else self.apply_angle_move_in_place
+        self.opp_apply_in_place = self.apply_move_in_place if self.opp == 'line' else self.apply_angle_move_in_place
+        self.undo = self.undo_move_in_place if self.type == 'line' else self.undo_angle_move_in_place
+        self.opp_undo = self.undo_move_in_place if self.opp == 'line' else self.undo_angle_move_in_place
+        self.apply = self.apply_move if self.type == 'line' else self.apply_angle_move
+        if self.tag == 'X':
+            self.op_tag = 'O'
+            self.num = 1
+        else:
+            self.op_tag = 'X'
+            self.num = -1
+        self.C = np.sqrt(2)
+        self.num_rolls = 10000 
+        self.root = Node(None)
+
+    def rollout(self, state, turn):
+        cur_state = np.copy(state)
+            #print(self.show_board(cur_state))
+        moves = self.get(cur_state, self.tag)
+
+        moves_op = self.opp_get(cur_state, self.op_tag)
+        if turn == self.tag:
+            if not moves:
+                return 0
+            ind = np.random.randint(len(moves))
+            i, j, dr = moves[ind]
+            while not self.allowed(cur_state, i, j, dr, self.tag):
+                del moves[ind]
+                if not moves:
+                    return 0
+                ind = np.random.randint(len(moves))
+                i, j, dr = moves[ind]
+            self.apply_in_place(cur_state, i, j, dr, self.num)
+
+        if not moves_op:
+            return 1
+
+        while moves_op and moves:
+            ind = np.random.randint(len(moves_op))
+            i, j, dr = moves_op[ind]
+            #print(i, j, dr)
+            while not self.opp_allowed(cur_state, i, j, dr, self.op_tag):
+                del moves_op[ind]
+                if not moves_op:
+                    return 1
+                ind = np.random.randint(len(moves_op))
+                i, j, dr = moves_op[ind]
+            #print(i, j, dr)
+            self.opp_apply_in_place(cur_state, i, j, dr, -self.num)
+            #print(self.show_board(cur_state))
+            ind = np.random.randint(len(moves))
+            i, j, dr = moves[ind]
+            while not self.allowed(cur_state, i, j, dr, self.tag):
+                del moves[ind]
+                if not moves:
+                    return 0
+                ind = np.random.randint(len(moves))
+                i, j, dr = moves[ind]
+            self.apply_in_place(cur_state, i, j, dr, self.num)
+        return 0
+
+    def build_tree(self, state):
+        cur_state = np.copy(state)
+        num_rolls = 0
+        done = False
+        #root.unexplored_moves = self.get(cur_state, self.tag)
+        def dfs(cur_node, depth):
+            nonlocal cur_state
+            nonlocal num_rolls
+            nonlocal done
+            #num_rolls += 1
+            if depth % 2 == 0:
+                if cur_node.unexplored_moves:
+                    i, j, dr = random.choice(cur_node.unexplored_moves)
+                    self.apply_in_place(cur_state, i, j, dr, self.num)
+                    cur_node.dct[(i, j, dr)] = Node(cur_node)
+                    cur_node.dct[(i, j, dr)].unexplored_moves = self.opp_get(cur_state, self.op_tag)
+                    win = self.rollout(cur_state, self.op_tag)
+                    num_rolls += 1
+                    cur_node.dct[(i, j, dr)].tot += 1
+                    cur_node.dct[(i, j, dr)].w += win
+                    cur_node.tot+= 1
+                    cur_node.w += win
+                    self.undo(cur_state, i, j, dr)
+                    cur_node.unexplored_moves.remove((i, j, dr))
+                    return win
+                else:
+                    best = 0
+                    for key, value in cur_node.dct.items():
+                        if best <= value.w/value.tot + self.C*np.sqrt(np.log(cur_node.tot)/value.tot):
+                            best = value.w/value.tot + self.C*np.sqrt(np.log(cur_node.tot)/value.tot)
+                            i, j, dr = key
+                    if best == 0:
+                        done = True
+                        return 0
+                    self.apply_in_place(cur_state, i, j, dr, self.num)
+                    win = dfs(cur_node.dct[(i, j, dr)], depth + 1)
+                    cur_node.w += win
+                    cur_node.tot += 1
+                    self.undo(cur_state, i, j, dr)
+                    return win
+            else:
+
+                if cur_node.unexplored_moves:
+                    i, j, dr = random.choice(cur_node.unexplored_moves)
+                    self.opp_apply_in_place(cur_state, i, j, dr, -self.num)
+                    cur_node.dct[(i, j, dr)] = Node(cur_node)
+                    cur_node.dct[(i, j, dr)].unexplored_moves = self.get(cur_state, self.tag)
+                    win = self.rollout(cur_state, self.tag)
+
+                    num_rolls += 1
+                    cur_node.dct[(i, j, dr)].tot += 1
+                    cur_node.dct[(i, j, dr)].w += win
+                    cur_node.tot+= 1
+
+                    cur_node.w += win
+                    self.opp_undo(cur_state, i, j, dr)
+                    cur_node.unexplored_moves.remove((i, j, dr))
+                    return win
+                else:
+                    best = 0
+                    for key, value in cur_node.dct.items():
+                        if best <= (value.tot - value.w)/value.tot + self.C*np.sqrt(np.log(cur_node.tot)/value.tot):
+                            best = (value.tot - value.w)/value.tot + self.C*np.sqrt(np.log(cur_node.tot)/value.tot)
+                            i, j, dr = key
+                    if best == 0:
+                        done = True
+                        return 0
+                    self.opp_apply_in_place(cur_state, i, j, dr, -self.num)
+                    win = dfs(cur_node.dct[(i, j, dr)], depth + 1)
+                    cur_node.w += win
+                    cur_node.tot += 1
+                    self.opp_undo(cur_state, i, j, dr)
+                    return win
+        while num_rolls < self.num_rolls:
+            dfs(self.root, 0)
+            if done:
+                break
+
+
+
+    def make_move(self, state, last_move):
+
+        if last_move in self.root.dct:
+            self.root = self.root.dct[last_move]
+        else:
+            self.root = Node(None)
+            self.root.unexplored_moves = self.get(state, self.tag)
+
+        self.build_tree(state)
+        #print(len(self.root.dct))
+
+        moves = self.get(state, self.tag)
+        if not moves:
+            return state, None
+        best = 0
+        #print(self.show_board(state))
+        for key, value in self.root.dct.items():
+            #print(i, j, dr)
+            if value.w/value.tot >= best:
+                best = value.w/value.tot
+                best_move = key
+
+        self.root = self.root.dct[best_move]
+
+        print(best)
+        print(len(moves))
+        if self.type == 'line':
+            print(str(chr(ord('a')+best_move[1])) + ' ' + str(best_move[0]) + ' ' + dirs[best_move[2]])
+        else:
+            print(str(chr(ord('a')+best_move[1])) + ' ' + str(best_move[0]) + ' ' + dirs_angle[best_move[2]])
+        #print(self.show_board(state))
+        return self.apply(state, best_move[0], best_move[1], best_move[2], self.num), best_move
+
+
+
+
+
         
 
 class Rando(Player):
@@ -310,21 +507,21 @@ class Rando(Player):
         self.get = self.get_moves if self.type == 'line' else self.get_angle_moves
         self.apply = self.apply_move if self.type == 'line' else self.apply_angle_move
 
-    def make_move(self, state):
+    def make_move(self, state, last_move):
         moves = self.get(state, self.tag)
         if not moves:
-            return state
+            return state, None
         #print(self.show_board(state))
         best_move = random.choice(moves)
         #print(self.show_board(state))
-        return self.apply(state, best_move[0], best_move[1], best_move[2], self.num)
+        return self.apply(state, best_move[0], best_move[1], best_move[2], self.num), best_move
 
 
 def get_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--first', type=str, default='bot_line',
+    parser.add_argument('--first', type=str, default='botmc_line',
                         help='First player')
-    parser.add_argument('--second', type=str, default='bot_line',
+    parser.add_argument('--second', type=str, default='botmc_line',
                         help='Second Player')
     parser.add_argument('--num', type=int, default=50,
                         help='Number of random games in the Monte Carlo evaluation')
@@ -342,6 +539,9 @@ def main():
     elif args.first == 'human_line' or args.first == 'human_angle':
         p1 = 'Human'
         t1 = args.first[6:]
+    elif args.first == 'botmc_line' or args.first == 'botmc_angle':
+        p1 = 'AgentMC'
+        t1 = args.first[6:]
     else:
         p1 = 'Rando'
         t1 = args.first[7:]
@@ -351,6 +551,9 @@ def main():
         t2 = args.second[4:]
     elif args.second == 'human_line' or args.second == 'human_angle':
         p2 = 'Human'
+        t2 = args.second[6:]
+    elif args.second == 'botmc_line' or args.second == 'botmc_angle':
+        p2 = 'AgentMC'
         t2 = args.second[6:]
     else:
         p2 = 'Rando'
