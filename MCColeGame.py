@@ -203,12 +203,24 @@ class Human(Player):
         i = int(i)
         j = ord(lt[0]) - ord('a')
         if self.type == 'line':
+            if dr not in dir_str_dict:
+                print('Illegal move.')
+                return self.make_move(state, last_move)
             dr = dir_str_dict[dr]
         else:
+            if dr not in dir_str_angle_dict:
+                print('Illegal move.')
+                return self.make_move(state, last_move)
             dr = dir_str_angle_dict[dr]
         if self.type == 'line':
+            if not self.valid_move(state, i, j, dr, self.tag):
+                print('Illegal move.')
+                return self.make_move(state, last_move)
             s = self.apply_move(state, i, j, dr, self.num)
         else:
+            if not self.valid_angle_move(state, i, j, dr, self.tag):
+                print('Illegal move.')
+                return self.make_move(state, last_move)
             s = self.apply_angle_move(state, i, j, dr, self.num)
         return s, (i, j, dr)
 
