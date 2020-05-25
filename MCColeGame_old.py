@@ -138,7 +138,7 @@ class Player():
         moves = []
         for i in range(self.n):
             for j in range(self.n):
-                for dr in range(4):
+                for dr in [0,2]:
                     if self.valid_move(state, i, j, dr, tag):
                         moves.append((i, j, dr))
         return moves
@@ -332,7 +332,7 @@ class AgentMC(Player):
             self.op_tag = 'X'
             self.num = -1
         self.C = np.sqrt(2)
-        self.num_rolls = 10000 
+        self.num_rolls = 2000 
         self.root = Node(None)
 
     def rollout(self, state, turn):
