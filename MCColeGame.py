@@ -199,7 +199,11 @@ class Human(Player):
         self.type = tp
 
     def make_move(self, state, last_move):
-        lt, i, dr = input('Choose move number: ').split(' ')
+        try:
+            lt, i, dr = input('Choose move number: ').split(' ')
+        except:
+            print('Illegal move.')
+            return self.make_move(state, last_move)
         i = int(i)
         j = ord(lt[0]) - ord('a')
         if self.type == 'line':
