@@ -1,7 +1,7 @@
 #!/bin/zsh
 
-for i in {1..100}
+for i in {1..10}
 do
-	python3 MCColeGame.py --logfile ./angle_vs_line.txt --first bot_angle --second bot_line --noprint --num 10 > /dev/null 
+	python3 MCColeGame.py --logfile ./angle_vs_line_10.txt --first botmc_angle --second botmc_line --noprint --r1 2000 --r2 2000 > /dev/null 
 	echo $i
 done
