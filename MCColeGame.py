@@ -2,6 +2,7 @@ import random
 import numpy as np
 import argparse
 import sys
+#from Naive_MC_Agent import Agent
 
 dir_dict = {0:(-1, 0), 1:(1, 0), 2:(0, -1), 3:(0, 1)}
 dir_angle_dict = {0:(1, 1), 1:(-1, 1), 2:(1, -1), 3:(-1, -1)}
@@ -30,7 +31,7 @@ class ColeGame():
             self.player2 = player2(tot=num, tag='O', tp=tp2, opp=tp1)
         else:
             player2 = globals()[player2]
-            self.player2 = player1(tot=num, tag='O', tp=tp2, opp=tp1, C=C2, num_rolls = num_rolls2)
+            self.player2 = player2(tot=num, tag='O', tp=tp2, opp=tp1, C=C2, num_rolls = num_rolls2)
         self.winner = None
         self.turn = 'X'
         self.player_turn = self.player1
@@ -489,6 +490,99 @@ class Rando(Player):
         best_move = random.choice(moves)
         #print(self.show_board(state))
         return self.apply(state, best_move[0], best_move[1], best_move[2], self.num), best_move
+
+
+class Agent(Player):
+
+    def __init__(self, tot, tag, tp, opp):
+        super().__init__(tot, tag, tp, opp)
+        self.get = self.get_moves if self.type == 'line' else self.get_angle_moves
+        self.opp_get = self.get_moves if self.opp == 'line' else self.get_angle_moves
+        self.allowed = self.valid_move if self.type == 'line' else self.valid_angle_move
+        self.opp_allowed = self.valid_move if self.opp == 'line' else self.valid_angle_move
+        self.apply_in_place = self.apply_move_in_place if self.type == 'line' else self.apply_angle_move_in_place
+        self.opp_apply_in_place = self.apply_move_in_place if self.opp == 'line' else self.apply_angle_move_in_place
+        self.undo = self.undo_move_in_place if self.type == 'line' else self.undo_angle_move_in_place
+        self.apply = self.apply_move if self.type == 'line' else self.apply_angle_move
+        if self.tag == 'X':
+            self.op_tag = 'O'
+            self.num = 1
+        else:
+            self.op_tag = 'X'
+            self.num = -1
+
+
+
+
+    def eval_pos(self, state):
+        win = 0
+        for qq in range(self.tot):
+            cur_state = np.copy(state)
+            #print(self.show_board(cur_state))
+            moves = self.get(cur_state, self.tag)
+
+            moves_op = self.opp_get(cur_state, self.op_tag)
+            if not moves_op:
+                return 1.0
+            if not moves:
+                return 0.0
+            while moves_op and moves:
+                ind = np.random.randint(len(moves_op))
+                i, j, dr = moves_op[ind]
+                #print(i, j, dr)
+                game_won = 0
+                while not self.opp_allowed(cur_state, i, j, dr, self.op_tag):
+                    del moves_op[ind]
+                    if not moves_op:
+                        game_won = 1
+                        break
+                    ind = np.random.randint(len(moves_op))
+                    i, j, dr = moves_op[ind]
+                if game_won == 1:
+                    win += 1
+                    break
+                #print(i, j, dr)
+                self.opp_apply_in_place(cur_state, i, j, dr, -self.num)
+                #print(self.show_board(cur_state))
+                ind = np.random.randint(len(moves))
+                i, j, dr = moves[ind]
+                while not self.allowed(cur_state, i, j, dr, self.tag):
+                    del moves[ind]
+                    if not moves:
+                        break
+                    ind = np.random.randint(len(moves))
+                    i, j, dr = moves[ind]
+                self.apply_in_place(cur_state, i, j, dr, self.num)
+                #print(self.show_board(cur_state))
+                #print(len(moves))
+                #print(len(moves_op))
+        return win/self.tot
+
+
+    def make_move(self, state, last_move):
+
+        moves = self.get(state, self.tag)
+        if not moves:
+            return state, None
+        best = 0
+        #print(self.show_board(state))
+        for i, j, dr in moves:
+            #print(i, j, dr)
+            self.apply_in_place(state, i, j, dr, self.num)
+            ev = self.eval_pos(state)
+            if ev >= best:
+                best = ev
+                best_move = (i, j, dr)
+            self.undo(state, i, j, dr)
+        print(best)
+        print(len(moves))
+        if self.type == 'line':
+            print(str(chr(ord('a')+best_move[1])) + ' ' + str(best_move[0]) + ' ' + dirs[best_move[2]])
+        else:
+            print(str(chr(ord('a')+best_move[1])) + ' ' + str(best_move[0]) + ' ' + dirs_angle[best_move[2]])
+        #print(self.show_board(state))
+        return self.apply(state, best_move[0], best_move[1], best_move[2], self.num), best_move
+
 
 
 def get_arguments():
