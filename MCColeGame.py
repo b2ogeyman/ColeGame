@@ -597,9 +597,9 @@ def get_arguments():
                         help='File to record the games')
     parser.add_argument('--noprint', action='store_false', default=True,
                         help='Print')
-    parser.add_argument('--C1', type=float, default=1.4,
+    parser.add_argument('--C1', type=float, default=1,
                         help='Exploration constant of player 1')
-    parser.add_argument('--C2', type=float, default=1.4,
+    parser.add_argument('--C2', type=float, default=1,
                         help='Exploration constant of player 2')
     parser.add_argument('--r1', type=int, default=10000,
                         help='Number of rollouts for player 1')
