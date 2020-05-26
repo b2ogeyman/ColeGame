@@ -11,16 +11,25 @@ dirs_angle = ['dr', 'ur', 'dl', 'ul']
 
 class ColeGame():
 
-    def __init__(self, player1, tp1, player2, tp2, filename, num, printing):
+    def __init__(self, player1, tp1, player2, tp2, C1, C2, num_rolls1, num_rolls2, filename, num, printing):
         self.n = 9
         self.savefile = open(filename, 'a')
         self.print = printing
         #print(self.print)
         self.state = np.zeros((self.n, self.n), dtype=int)
-        player1 = globals()[player1]
-        self.player1 = player1(tot=num, tag='X', tp=tp1, opp=tp2)
-        player2 = globals()[player2]
-        self.player2 = player2(tot=num, tag='O', tp=tp2, opp=tp1)
+        if player1 != 'AgentMC':
+            player1 = globals()[player1]
+            self.player1 = player1(tot=num, tag='X', tp=tp1, opp=tp2)
+        else:
+            player1 = globals()[player1]
+            self.player1 = player1(tot=num, tag='X', tp=tp1, opp=tp2, C=C1, num_rolls = num_rolls1)
+
+        if player2 != 'AgentMC':
+            player2 = globals()[player2]
+            self.player2 = player2(tot=num, tag='O', tp=tp2, opp=tp1)
+        else:
+            player2 = globals()[player2]
+            self.player2 = player1(tot=num, tag='O', tp=tp2, opp=tp1, C=C2, num_rolls = num_rolls2)
         self.winner = None
         self.turn = 'X'
         self.player_turn = self.player1
@@ -228,99 +237,6 @@ class Human(Player):
             s = self.apply_angle_move(state, i, j, dr, self.num)
         return s, (i, j, dr)
 
-class Agent(Player):
-
-    def __init__(self, tot, tag, tp, opp):
-        super().__init__(tot, tag, tp, opp)
-        self.get = self.get_moves if self.type == 'line' else self.get_angle_moves
-        self.opp_get = self.get_moves if self.opp == 'line' else self.get_angle_moves
-        self.allowed = self.valid_move if self.type == 'line' else self.valid_angle_move
-        self.opp_allowed = self.valid_move if self.opp == 'line' else self.valid_angle_move
-        self.apply_in_place = self.apply_move_in_place if self.type == 'line' else self.apply_angle_move_in_place
-        self.opp_apply_in_place = self.apply_move_in_place if self.opp == 'line' else self.apply_angle_move_in_place
-        self.undo = self.undo_move_in_place if self.type == 'line' else self.undo_angle_move_in_place
-        self.apply = self.apply_move if self.type == 'line' else self.apply_angle_move
-        if self.tag == 'X':
-            self.op_tag = 'O'
-            self.num = 1
-        else:
-            self.op_tag = 'X'
-            self.num = -1
-
-
-
-
-    def eval_pos(self, state):
-        win = 0
-        for qq in range(self.tot):
-            cur_state = np.copy(state)
-            #print(self.show_board(cur_state))
-            moves = self.get(cur_state, self.tag)
-
-            moves_op = self.opp_get(cur_state, self.op_tag)
-            if not moves_op:
-                return 1.0
-            if not moves:
-                return 0.0
-            while moves_op and moves:
-                ind = np.random.randint(len(moves_op))
-                i, j, dr = moves_op[ind]
-                #print(i, j, dr)
-                game_won = 0
-                while not self.opp_allowed(cur_state, i, j, dr, self.op_tag):
-                    del moves_op[ind]
-                    if not moves_op:
-                        game_won = 1
-                        break
-                    ind = np.random.randint(len(moves_op))
-                    i, j, dr = moves_op[ind]
-                if game_won == 1:
-                    win += 1
-                    break
-                #print(i, j, dr)
-                self.opp_apply_in_place(cur_state, i, j, dr, -self.num)
-                #print(self.show_board(cur_state))
-                ind = np.random.randint(len(moves))
-                i, j, dr = moves[ind]
-                while not self.allowed(cur_state, i, j, dr, self.tag):
-                    del moves[ind]
-                    if not moves:
-                        break
-                    ind = np.random.randint(len(moves))
-                    i, j, dr = moves[ind]
-                self.apply_in_place(cur_state, i, j, dr, self.num)
-                #print(self.show_board(cur_state))
-                #print(len(moves))
-                #print(len(moves_op))
-        return win/self.tot
-
-
-    def make_move(self, state, last_move):
-
-        moves = self.get(state, self.tag)
-        if not moves:
-            return state, None
-        best = 0
-        #print(self.show_board(state))
-        for i, j, dr in moves:
-            #print(i, j, dr)
-            self.apply_in_place(state, i, j, dr, self.num)
-            ev = self.eval_pos(state)
-            if ev >= best:
-                best = ev
-                best_move = (i, j, dr)
-            self.undo(state, i, j, dr)
-        print(best)
-        print(len(moves))
-        if self.type == 'line':
-            print(str(chr(ord('a')+best_move[1])) + ' ' + str(best_move[0]) + ' ' + dirs[best_move[2]])
-        else:
-            print(str(chr(ord('a')+best_move[1])) + ' ' + str(best_move[0]) + ' ' + dirs_angle[best_move[2]])
-        #print(self.show_board(state))
-        return self.apply(state, best_move[0], best_move[1], best_move[2], self.num), best_move
-
-
-
 class Node():
     def __init__(self, par):
         self.w = 0
@@ -330,7 +246,7 @@ class Node():
         self.unexplored_moves = []
 
 class AgentMC(Player):
-    def __init__(self, tot, tag, tp, opp):
+    def __init__(self, tot, tag, tp, opp, C, num_rolls):
         super().__init__(tot, tag, tp, opp)
         self.get = self.get_moves if self.type == 'line' else self.get_angle_moves
         self.opp_get = self.get_moves if self.opp == 'line' else self.get_angle_moves
@@ -347,8 +263,8 @@ class AgentMC(Player):
         else:
             self.op_tag = 'X'
             self.num = -1
-        self.C = np.sqrt(2)
-        self.num_rolls = 10000 
+        self.C = C
+        self.num_rolls = num_rolls
         self.root = Node(None)
 
     def rollout(self, state, turn):
@@ -402,74 +318,53 @@ class AgentMC(Player):
         num_rolls = 0
         done = False
         #root.unexplored_moves = self.get(cur_state, self.tag)
+
         def dfs(cur_node, depth):
             nonlocal cur_state
             nonlocal num_rolls
             nonlocal done
             #num_rolls += 1
             if depth % 2 == 0:
-                if cur_node.unexplored_moves:
-                    i, j, dr = random.choice(cur_node.unexplored_moves)
-                    self.apply_in_place(cur_state, i, j, dr, self.num)
-                    cur_node.dct[(i, j, dr)] = Node(cur_node)
-                    cur_node.dct[(i, j, dr)].unexplored_moves = self.opp_get(cur_state, self.op_tag)
-                    win = self.rollout(cur_state, self.op_tag)
-                    num_rolls += 1
-                    cur_node.dct[(i, j, dr)].tot += 1
-                    cur_node.dct[(i, j, dr)].w += win
-                    cur_node.tot+= 1
-                    cur_node.w += win
-                    self.undo(cur_state, i, j, dr)
-                    cur_node.unexplored_moves.remove((i, j, dr))
-                    return win
-                else:
-                    best = 0
-                    for key, value in cur_node.dct.items():
-                        if best <= value.w/value.tot + self.C*np.sqrt(np.log(cur_node.tot)/value.tot):
-                            best = value.w/value.tot + self.C*np.sqrt(np.log(cur_node.tot)/value.tot)
-                            i, j, dr = key
-                    if best == 0:
-                        done = True
-                        return 0
-                    self.apply_in_place(cur_state, i, j, dr, self.num)
-                    win = dfs(cur_node.dct[(i, j, dr)], depth + 1)
-                    cur_node.w += win
-                    cur_node.tot += 1
-                    self.undo(cur_state, i, j, dr)
-                    return win
+                apply = self.apply_in_place
+                undo = self.undo
+                get = self.opp_get
+                tag = self.op_tag
+                num = self.num
             else:
-
-                if cur_node.unexplored_moves:
-                    i, j, dr = random.choice(cur_node.unexplored_moves)
-                    self.opp_apply_in_place(cur_state, i, j, dr, -self.num)
-                    cur_node.dct[(i, j, dr)] = Node(cur_node)
-                    cur_node.dct[(i, j, dr)].unexplored_moves = self.get(cur_state, self.tag)
-                    win = self.rollout(cur_state, self.tag)
-
-                    num_rolls += 1
-                    cur_node.dct[(i, j, dr)].tot += 1
-                    cur_node.dct[(i, j, dr)].w += win
-                    cur_node.tot+= 1
-
-                    cur_node.w += win
-                    self.opp_undo(cur_state, i, j, dr)
-                    cur_node.unexplored_moves.remove((i, j, dr))
-                    return win
-                else:
-                    best = 0
-                    for key, value in cur_node.dct.items():
-                        if best <= (value.tot - value.w)/value.tot + self.C*np.sqrt(np.log(cur_node.tot)/value.tot):
-                            best = (value.tot - value.w)/value.tot + self.C*np.sqrt(np.log(cur_node.tot)/value.tot)
-                            i, j, dr = key
-                    if best == 0:
-                        done = True
-                        return 0
-                    self.opp_apply_in_place(cur_state, i, j, dr, -self.num)
-                    win = dfs(cur_node.dct[(i, j, dr)], depth + 1)
-                    cur_node.w += win
-                    cur_node.tot += 1
-                    self.opp_undo(cur_state, i, j, dr)
-                    return win
+                apply = self.opp_apply_in_place
+                undo = self.opp_undo
+                get = self.get
+                tag = self.tag
+                num = -self.num
+            if cur_node.unexplored_moves:
+                i, j, dr = random.choice(cur_node.unexplored_moves)
+                apply(cur_state, i, j, dr, num)
+                cur_node.dct[(i, j, dr)] = Node(cur_node)
+                cur_node.dct[(i, j, dr)].unexplored_moves = get(cur_state, tag)
+                win = self.rollout(cur_state, tag)
+                num_rolls += 1
+                cur_node.dct[(i, j, dr)].tot += 1
+                cur_node.dct[(i, j, dr)].w += win
+                cur_node.tot+= 1
+                cur_node.w += win
+                undo(cur_state, i, j, dr)
+                cur_node.unexplored_moves.remove((i, j, dr))
+                return win
+            else:
+                best = 0
+                for key, value in cur_node.dct.items():
+                    if best <= value.w/value.tot + self.C*np.sqrt(np.log(cur_node.tot)/value.tot):
+                        best = value.w/value.tot + self.C*np.sqrt(np.log(cur_node.tot)/value.tot)
+                        i, j, dr = key
+                if best == 0:
+                    done = True
+                    return 0
+                apply(cur_state, i, j, dr, num)
+                win = dfs(cur_node.dct[(i, j, dr)], depth + 1)
+                cur_node.w += win
+                cur_node.tot += 1
+                undo(cur_state, i, j, dr)
+                return win
         while num_rolls < self.num_rolls:
             dfs(self.root, 0)
             if done:
@@ -499,10 +394,13 @@ class AgentMC(Player):
                 best = value.w/value.tot
                 best_move = key
 
+
+        print('Exploration number: ', np.sqrt(np.log(self.root.tot)/self.root.dct[best_move].tot))
         self.root = self.root.dct[best_move]
 
-        print(best)
-        print(len(moves))
+        print('Win percentage: ', best)
+        #print(len(moves))
+        print('Number of simulations: ', self.root.tot)
         if self.type == 'line':
             print(str(chr(ord('a')+best_move[1])) + ' ' + str(best_move[0]) + ' ' + dirs[best_move[2]])
         else:
@@ -545,6 +443,14 @@ def get_arguments():
                         help='File to record the games')
     parser.add_argument('--noprint', action='store_false', default=True,
                         help='Print')
+    parser.add_argument('--C1', type=float, default=1.4,
+                        help='Exploration constant of player 1')
+    parser.add_argument('--C2', type=float, default=1.4,
+                        help='Exploration constant of player 2')
+    parser.add_argument('--r1', type=int, default=10000,
+                        help='Number of rollouts for player 1')
+    parser.add_argument('--r2', type=int, default=10000,
+                        help='Number of rollouts for player 2')
     return parser.parse_args()
 
 def main():
@@ -576,7 +482,7 @@ def main():
         t2 = args.second[7:]
 
     #print(args.print)
-    game = ColeGame(p1, t1, p2, t2, args.logfile, args.num, args.noprint)
+    game = ColeGame(p1, t1, p2, t2, args.C1, args.C2, args.r1, args.r2, args.logfile, args.num, args.noprint)
     game.play_game()
 
 
