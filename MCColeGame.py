@@ -1,6 +1,7 @@
 import random
 import numpy as np
 import argparse
+import sys
 
 dir_dict = {0:(-1, 0), 1:(1, 0), 2:(0, -1), 3:(0, 1)}
 dir_angle_dict = {0:(1, 1), 1:(-1, 1), 2:(1, -1), 3:(-1, -1)}
@@ -243,6 +244,10 @@ class Node():
         self.tot = 0
         self.par = par
         self.dct = {}
+        #self.rave_tot = {}
+        self.rave_tot = 0
+        self.rave_w = 0
+        #self.rave_w = {}
         self.unexplored_moves = []
 
 class AgentMC(Player):
@@ -265,29 +270,32 @@ class AgentMC(Player):
             self.num = -1
         self.C = C
         self.num_rolls = num_rolls
+        self.k = num_rolls/10
         self.root = Node(None)
 
     def rollout(self, state, turn):
         cur_state = np.copy(state)
             #print(self.show_board(cur_state))
         moves = self.get(cur_state, self.tag)
-
+        all_moves = []
+        all_moves_op = []
         moves_op = self.opp_get(cur_state, self.op_tag)
         if turn == self.tag:
             if not moves:
-                return 0
+                return 0, all_moves, all_moves_op
             ind = np.random.randint(len(moves))
             i, j, dr = moves[ind]
             while not self.allowed(cur_state, i, j, dr, self.tag):
                 del moves[ind]
                 if not moves:
-                    return 0
+                    return 0, all_moves, all_moves_op
                 ind = np.random.randint(len(moves))
                 i, j, dr = moves[ind]
+            all_moves.append((i, j, dr))
             self.apply_in_place(cur_state, i, j, dr, self.num)
 
         if not moves_op:
-            return 1
+            return 1, all_moves, all_moves_op
 
         while moves_op and moves:
             ind = np.random.randint(len(moves_op))
@@ -296,10 +304,11 @@ class AgentMC(Player):
             while not self.opp_allowed(cur_state, i, j, dr, self.op_tag):
                 del moves_op[ind]
                 if not moves_op:
-                    return 1
+                    return 1, all_moves, all_moves_op
                 ind = np.random.randint(len(moves_op))
                 i, j, dr = moves_op[ind]
             #print(i, j, dr)
+            all_moves_op.append((i, j, dr))
             self.opp_apply_in_place(cur_state, i, j, dr, -self.num)
             #print(self.show_board(cur_state))
             ind = np.random.randint(len(moves))
@@ -307,11 +316,12 @@ class AgentMC(Player):
             while not self.allowed(cur_state, i, j, dr, self.tag):
                 del moves[ind]
                 if not moves:
-                    return 0
+                    return 0, all_moves, all_moves_op
                 ind = np.random.randint(len(moves))
                 i, j, dr = moves[ind]
+            all_moves.append((i, j, dr))
             self.apply_in_place(cur_state, i, j, dr, self.num)
-        return 0
+        return 0, all_moves, all_moves_op
 
     def build_tree(self, state):
         cur_state = np.copy(state)
@@ -330,18 +340,26 @@ class AgentMC(Player):
                 get = self.opp_get
                 tag = self.op_tag
                 num = self.num
+                mult = 1
             else:
                 apply = self.opp_apply_in_place
                 undo = self.opp_undo
                 get = self.get
                 tag = self.tag
                 num = -self.num
+                mult = -1
+                #w = cur_node.tot - cur_node.w
             if cur_node.unexplored_moves:
                 i, j, dr = random.choice(cur_node.unexplored_moves)
                 apply(cur_state, i, j, dr, num)
                 cur_node.dct[(i, j, dr)] = Node(cur_node)
                 cur_node.dct[(i, j, dr)].unexplored_moves = get(cur_state, tag)
-                win = self.rollout(cur_state, tag)
+                win, all_moves, all_moves_op = self.rollout(cur_state, tag)
+                if depth % 2 == 0:
+                    all = all_moves
+                else:
+                    all = all_moves_op
+                all.append((i, j, dr))
                 num_rolls += 1
                 cur_node.dct[(i, j, dr)].tot += 1
                 cur_node.dct[(i, j, dr)].w += win
@@ -349,26 +367,61 @@ class AgentMC(Player):
                 cur_node.w += win
                 undo(cur_state, i, j, dr)
                 cur_node.unexplored_moves.remove((i, j, dr))
-                return win
+                cur_node.dct[(i, j, dr)].rave_tot = 0
+                cur_node.dct[(i,j,dr)].rave_w = 0
+                for move in all:
+                    if move in cur_node.dct:
+                        cur_node.dct[move].rave_tot += 1
+                        cur_node.dct[move].rave_w += win
+
+                return win, (i, j, dr), all_moves, all_moves_op
             else:
                 best = 0
                 for key, value in cur_node.dct.items():
-                    if best <= value.w/value.tot + self.C*np.sqrt(np.log(cur_node.tot)/value.tot):
-                        best = value.w/value.tot + self.C*np.sqrt(np.log(cur_node.tot)/value.tot)
+                    alpha = np.sqrt(value.tot/(value.tot+3*self.k))
+                    rave_tot = value.rave_tot + value.tot
+                    rave_w = value.rave_w + value.w
+                    score = alpha*((value.tot/2 - mult*(value.tot/2-value.w))/value.tot + self.C*np.sqrt(np.log(cur_node.tot)/value.tot)) +\
+                        (1-alpha)*((rave_tot/2 - mult*(rave_tot/2-rave_w))/rave_tot + self.C*np.sqrt(np.log(cur_node.rave_tot + cur_node.tot)/rave_tot))
+                    if best <= score:
+                        best = score
                         i, j, dr = key
                 if best == 0:
                     done = True
-                    return 0
+                    return 0, (-1, -1, -1), [], []
                 apply(cur_state, i, j, dr, num)
-                win = dfs(cur_node.dct[(i, j, dr)], depth + 1)
+                win, move, all_moves, all_moves_op = dfs(cur_node.dct[(i, j, dr)], depth + 1)
                 cur_node.w += win
                 cur_node.tot += 1
+                if depth % 2 == 0: 
+                    for move_i in all_moves:
+                        if move_i in cur_node.dct:
+                            cur_node.dct[move_i].rave_tot += 1
+                            cur_node.dct[move_i].rave_w += win
+                        else:
+                            assert(False)
+                    if move in cur_node.dct:
+                        cur_node.dct[move].rave_tot += 1
+                        cur_node.dct[move].rave_w += win
+                else:
+                    for move_i in all_moves_op:
+                        if move_i in cur_node.dct:
+                            cur_node.dct[move_i].rave_tot += 1
+                            cur_node.dct[move_i].rave_w += win
+                        else:
+                            assert(False)
                 undo(cur_state, i, j, dr)
-                return win
+                return win, move, all_moves, all_moves_op
         while num_rolls < self.num_rolls:
             dfs(self.root, 0)
             if done:
                 break
+
+    def print_move(self, best_move):
+        if self.type == 'line':
+            print(str(chr(ord('a')+best_move[1])) + ' ' + str(best_move[0]) + ' ' + dirs[best_move[2]])
+        else:
+            print(str(chr(ord('a')+best_move[1])) + ' ' + str(best_move[0]) + ' ' + dirs_angle[best_move[2]])
 
 
 
@@ -390,22 +443,29 @@ class AgentMC(Player):
         #print(self.show_board(state))
         for key, value in self.root.dct.items():
             #print(i, j, dr)
-            if value.w/value.tot >= best:
-                best = value.w/value.tot
+            alpha = np.sqrt(value.tot/(value.tot+3*self.k))
+            rave_tot = value.rave_tot + value.tot
+            rave_w = value.rave_w + value.w
+            score = alpha*(value.w/value.tot) + (1-alpha)*(rave_w/rave_tot)
+            if score >= best:
+                best = score
                 best_move = key
 
 
         print('Exploration number: ', np.sqrt(np.log(self.root.tot)/self.root.dct[best_move].tot))
-        self.root = self.root.dct[best_move]
 
         print('Win percentage: ', best)
-        #print(len(moves))
-        print('Number of simulations: ', self.root.tot)
-        if self.type == 'line':
-            print(str(chr(ord('a')+best_move[1])) + ' ' + str(best_move[0]) + ' ' + dirs[best_move[2]])
-        else:
-            print(str(chr(ord('a')+best_move[1])) + ' ' + str(best_move[0]) + ' ' + dirs_angle[best_move[2]])
+        #print(len(moves))ßß
+        print('Number of simulations: ', self.root.dct[best_move].tot)
+        print('Number of RAVE simulations: ', self.root.dct[best_move].rave_tot)
+        #for i in range(0, 8):
+        #    for j in range(0, 8):
+        #        sys.stdout.write("{:.2f}".format(self.root.dct[(i,j,0)].rave_w/self.root.dct[(i,j,0)].rave_tot) + " ")
+        #    print()
+        print('Alpha: ', np.sqrt(self.root.dct[best_move].tot/(self.root.dct[best_move].tot+3*self.k)))
+        self.root = self.root.dct[best_move]
         #print(self.show_board(state))
+        self.print_move(best_move)
         return self.apply(state, best_move[0], best_move[1], best_move[2], self.num), best_move
 
 
